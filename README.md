@@ -1,6 +1,6 @@
 # 自动签到脚本
 
-多网站自动签到，支持 GitHub Actions 每日自动执行。
+多网站自动签到，支持 GitHub Actions 每日自动执行，支持 Telegram 机器人通知。
 
 ## 支持网站
 
@@ -22,29 +22,45 @@
 
 添加以下 Secrets：
 
-| Secret 名称 | 说明 |
-|-------------|------|
-| `MINIDUO_USER` | miniduo.cn 用户名 |
-| `MINIDUO_PASS` | miniduo.cn 密码 |
-| `SVYUN_USER` | svyun.com 用户名 |
-| `SVYUN_PASS` | svyun.com 密码 |
-| `VPS8_USER` | vps8.zz.cd 用户名 |
-| `VPS8_PASS` | vps8.zz.cd 密码 |
+| Secret 名称 | 说明 | 必填 |
+|-------------|------|------|
+| `MINIDUO_USER` | miniduo.cn 用户名 | 否 |
+| `MINIDUO_PASS` | miniduo.cn 密码 | 否 |
+| `SVYUN_USER` | svyun.com 用户名 | 否 |
+| `SVYUN_PASS` | svyun.com 密码 | 否 |
+| `VPS8_USER` | vps8.zz.cd 用户名 | 否 |
+| `VPS8_PASS` | vps8.zz.cd 密码 | 否 |
+| `TG_BOT_TOKEN` | Telegram Bot Token | 否 |
+| `TG_CHAT_ID` | Telegram Chat ID | 否 |
 
 > 不需要的网站可以不配置，脚本会自动跳过。
 
-### 3. 启用 Actions
+### 3. 获取 Telegram Bot Token 和 Chat ID
+
+#### 创建 Bot
+1. 在 Telegram 搜索 `@BotFather`
+2. 发送 `/newbot`
+3. 按提示设置 Bot 名称
+4. 获得 Token（格式：`123456789:ABCdefGHIjklMNOpqrsTUVwxyz`）
+
+#### 获取 Chat ID
+1. 在 Telegram 搜索 `@userinfobot`
+2. 发送任意消息
+3. 它会回复你的 Chat ID（纯数字）
+
+### 4. 启用 Actions
 
 进入 **Actions** 标签页，点击 "I understand my workflows, go ahead and enable them"。
 
-### 4. 手动测试
+### 5. 手动测试
 
 Actions → Auto Check-in → Run workflow → Run workflow
 
-### 5. 查看结果
+### 6. 查看结果
 
 - 运行日志会显示签到结果
 - 截图在 Artifacts 中下载（保留 7 天）
+- **Telegram 会收到签到报告和截图**
 
 ## 执行时间
 
@@ -65,6 +81,19 @@ schedule:
 | `0 1 * * *` | 09:00 |
 | `0 16 * * *` | 00:00（次日） |
 
+## Telegram 通知示例
+
+```
+🔔 自动签到报告
+📅 时间: 2025-05-08 08:00:00
+
+✅ miniduo.cn: 成功 | 余额 123.45 元
+✅ svyun.com: 成功
+❌ vps8.zz.cd: 失败
+
+📊 统计: 成功 2 | 失败 1 | 跳过 0
+```
+
 ## 本地运行
 
 ```bash
@@ -75,6 +104,8 @@ playwright install chromium
 # 设置环境变量
 export MINIDUO_USER="your_username"
 export MINIDUO_PASS="your_password"
+export TG_BOT_TOKEN="your_bot_token"
+export TG_CHAT_ID="your_chat_id"
 # ... 其他账号
 
 # 运行
