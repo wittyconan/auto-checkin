@@ -40,97 +40,73 @@ async def send_tg(text, photo=None):
 # ================= 站点逻辑 =================
 
 async def checkin_miniduo(context):
-    print("【miniduo.cn】正在尝试破解白屏...")
+    print("【miniduo.cn】正在执行极致兼容登录...")
     page = await context.new_page()
     try:
         await page.goto('https://www.miniduo.cn/login', timeout=60000)
-        await asyncio.sleep(15) 
-        if len(await page.content()) < 500: return False, "白屏(IP封锁)", None
+        # 根据图1，点击“邮箱登录”标签
+        email_tab = page.locator('text=邮箱登录')
+        await email_tab.wait_for(state="visible", timeout=20000)
+        await email_tab.click()
         
-        # 监听式注入
-        await page.wait_for_selector('input[placeholder*="邮箱"]', timeout=20000)
-        await page.evaluate(f"""() => {{
-            const tabs = Array.from(document.querySelectorAll('*')).find(el => el.textContent === '邮箱登录');
-            if(tabs) tabs.click();
-            document.querySelector('input[placeholder*="邮箱"]').value = '{MINIDUO_USER}';
-            document.querySelector('input[type="password"]').value = '{MINIDUO_PASS}';
-            document.querySelector('button[type="submit"], .btn-login').click();
-        }}""")
+        # 填充账号
+        await page.type('input[placeholder*="邮箱"]', MINIDUO_USER, delay=100)
+        await page.type('input[type="password"]', MINIDUO_PASS, delay=100)
+        await page.get_by_role("button", name="登录").click()
+        
         await page.wait_for_url("**/cart", timeout=20000)
         await asyncio.sleep(8)
-        # 弹窗处理
-        try: await page.get_by_text("我知道了").click(timeout=3000)
+        # 处理弹窗和转盘
+        try: await page.get_by_text("我知道了").click(timeout=5000)
         except: pass
         await page.mouse.click(1160, 860) 
-        return True, "签到成功", await save_debug(page, "miniduo_ok")
+        return True, "已尝试触发签到", await save_debug(page, "miniduo_ok")
     except Exception as e:
         return False, f"异常: {str(e)[:20]}", await save_debug(page, "miniduo_err")
     finally: await page.close()
 
 async def checkin_svyun(context):
-    print("【svyun.com】监听式注入启动...")
+    print("【svyun.com】正在处理登录...")
     page = await context.new_page()
     try:
-        # 使用 domcontentloaded 快速切入
-        await page.goto('https://www.svyun.com/plugin/86/index.htm', timeout=60000, wait_until='domcontentloaded')
+        await page.goto('https://www.svyun.com/plugin/86/index.htm', timeout=60000)
+        # 根据图2，这里的输入框可能没有 name，使用 placeholder 匹配
+        user_input = page.locator('input[placeholder*="Email"], input[type="text"]')
+        await user_input.wait_for(state="visible", timeout=20000)
         
-        # 关键：显式等待输入框，无视 Loading 动画
-        user_selector = 'input[name="username"]'
-        await page.wait_for_selector(user_selector, state="visible", timeout=30000)
+        await user_input.type(SVYUN_USER, delay=100)
+        await page.locator('input[type="password"]').type(SVYUN_PASS, delay=100)
         
-        print("  ✓ 检测到登录框，注入数据...")
-        await page.evaluate(f"""() => {{
-            const u = document.querySelector('input[name="username"]');
-            const p = document.querySelector('input[name="password"]');
-            const c = document.querySelector('input[type="checkbox"]');
-            if(u) {{ u.value = '{SVYUN_USER}'; u.dispatchEvent(new Event('input', {{ bubbles: true }})); }}
-            if(p) {{ p.value = '{SVYUN_PASS}'; p.dispatchEvent(new Event('input', {{ bubbles: true }})); }}
-            if(c) c.click();
-        }}""")
+        # 勾选协议 (根据图2，点击文字部分)
+        await page.get_by_text("Read and agree").click()
+        await page.locator('button:has-text("Login")').click()
         
-        await asyncio.sleep(1)
-        await page.locator('button:has-text("Log in now"), button:has-text("Login")').first.click(force=True)
         await asyncio.sleep(8)
-        
-        # 点击签到
-        checkin_btn = page.locator('button:has-text("立即签到"), .checkin-btn')
-        if await checkin_btn.count() > 0:
-            await checkin_btn.first.click()
+        btn = page.locator('button:has-text("立即签到"), .checkin-btn')
+        if await btn.count() > 0:
+            await btn.first.click()
             await asyncio.sleep(5)
-            
-        # 跳转抽奖页获取次数
-        await page.goto('https://www.svyun.com/plugin/94/draw.htm?id=2', wait_until='domcontentloaded')
-        await asyncio.sleep(5)
-        content = await page.inner_text("body")
-        count = re.search(r"剩余抽奖次数\s*(\d+)\s*次", content)
-        msg = f"剩余:{count.group(1)}次" if count else "签到完成"
-        
-        # 点击查看详情弹出中奖图
-        try: await page.get_by_text("查看详情").click(timeout=5000); await asyncio.sleep(2)
-        except: pass
-        
-        return True, msg, await save_debug(page, "svyun_res")
+            # 跳转获取次数
+            await page.goto('https://www.svyun.com/plugin/94/draw.htm?id=2')
+            await asyncio.sleep(3)
+            return True, "签到成功", await save_debug(page, "svyun_res")
+        return False, "未见签到按钮", await save_debug(page, "svyun_fail")
     except Exception as e:
         return False, f"异常: {str(e)[:20]}", await save_debug(page, "svyun_err")
     finally: await page.close()
 
 async def checkin_vps8(context):
-    print("【vps8.zz.cd】处理Turnstile验证...")
+    print("【vps8.zz.cd】处理人机验证...")
     page = await context.new_page()
     try:
         await page.goto('https://vps8.zz.cd/login', timeout=60000)
+        # 根据图3，填入信息
+        await page.locator('input[name="email"]').type(VPS8_USER, delay=100)
+        await page.locator('input[name="password"]').type(VPS8_PASS, delay=100)
         
-        # 等待输入框出现
-        await page.wait_for_selector('input[name="email"]', state="visible", timeout=30000)
-        
-        await page.evaluate(f"""() => {{
-            document.querySelector('input[name="email"]').value = '{VPS8_USER}';
-            document.querySelector('input[name="password"]').value = '{VPS8_PASS}';
-        }}""")
-        
-        print("  正在探测并点击验证框...")
-        # 循环探测 Turnstile iframe
-        for i in range(10):
+        # 处理 Turnstile 验证
+        print("  正在尝试点击 CF 验证...")
+        for i in range(15):
             cf_frame = page.frame_locator('iframe[src*="challenges.cloudflare.com"]')
             if await cf_frame.locator('body').count() > 0:
                 await cf_frame.locator('body').click()
@@ -145,7 +121,7 @@ async def checkin_vps8(context):
         if await btn.count() > 0:
             await btn.first.click()
             return True, "签到成功", await save_debug(page, "vps8_ok")
-        return False, "未见按钮", await save_debug(page, "vps8_fail")
+        return False, "未见签到按钮", await save_debug(page, "vps8_fail")
     except Exception as e:
         return False, f"异常: {str(e)[:20]}", await save_debug(page, "vps8_err")
     finally: await page.close()
@@ -158,19 +134,18 @@ async def main():
         browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
         context = await browser.new_context(viewport={'width': 1280, 'height': 1024})
         
-        results = []
-        # 顺序执行，防止并发冲突
-        results.append(('Miniduo', await checkin_miniduo(context)))
-        await asyncio.sleep(10)
-        results.append(('Svyun', await checkin_svyun(context)))
-        await asyncio.sleep(10)
-        results.append(('VPS8', await checkin_vps8(context)))
+        # 执行
+        results = [
+            ('Miniduo', await checkin_miniduo(context)),
+            ('Svyun', await checkin_svyun(context)),
+            ('VPS8', await checkin_vps8(context))
+        ]
         
-        report = f"🔔 <b>自动签到报告 [{datetime.now().strftime('%m-%d %H:%M')}]</b>\n\n"
+        report = f"🔔 <b>自动签到报告 [{datetime.now().strftime('%H:%M')}]</b>\n\n"
         for name, (ok, msg, ss) in results:
-            report_line = f"{'✅' if ok else '❌'} <b>{name}</b>: {msg}"
-            await send_tg(report_line, photo=ss)
-            report += report_line + "\n"
+            status = "✅" if ok else "❌"
+            await send_tg(f"{status} <b>{name}</b>: {msg}", photo=ss)
+            report += f"{status} {name}: {msg}\n"
         
         await send_tg(report)
         await browser.close()
