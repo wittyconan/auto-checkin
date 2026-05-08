@@ -1,0 +1,45 @@
+name: Auto Check-in
+
+on:
+  schedule:
+    # 每天 UTC 0:00 执行（北京时间 8:00）
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+          playwright install-deps chromium
+      
+      - name: Run check-in script
+        env:
+          MINIDUO_USER: ${{ secrets.MINIDUO_USER }}
+          MINIDUO_PASS: ${{ secrets.MINIDUO_PASS }}
+          SVYUN_USER: ${{ secrets.SVYUN_USER }}
+          SVYUN_PASS: ${{ secrets.SVYUN_PASS }}
+          VPS8_USER: ${{ secrets.VPS8_USER }}
+          VPS8_PASS: ${{ secrets.VPS8_PASS }}
+          SCREENSHOT_DIR: ./screenshots
+        run: python checkin.py
+      
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkin-screenshots
+          path: ./screenshots/
+          retention-days: 7
