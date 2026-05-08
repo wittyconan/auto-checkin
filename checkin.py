@@ -193,21 +193,85 @@ async def checkin_miniduo(browser):
     results = {'success': False, 'balance': None, 'screenshot': None, 'message': ''}
     
     try:
-        print("  步骤1: 访问网站...")
+        # 步骤1: 访问登录页面
+        print("  步骤1: 访问登录页面...")
+        await page.goto('https://www.miniduo.cn/login', wait_until='networkidle', timeout=30000)
+        
+        # 步骤2: 点击"邮箱登录"标签
+        print("  步骤2: 切换到邮箱登录...")
+        email_tab_selectors = [
+            'text=邮箱登录',
+            'div:has-text("邮箱登录")',
+            'span:has-text("邮箱登录")',
+            '[class*="tab"]:has-text("邮箱")',
+        ]
+        clicked_tab = False
+        for selector in email_tab_selectors:
+            try:
+                if await page.locator(selector).count() > 0:
+                    await page.click(selector)
+                    print(f"  ✓ 点击邮箱登录标签")
+                    clicked_tab = True
+                    await asyncio.sleep(1)
+                    break
+            except:
+                continue
+        
+        if not clicked_tab:
+            print("  ! 未找到邮箱登录标签，尝试直接登录")
+        
+        # 步骤3: 填写登录表单
+        print("  步骤3: 填写登录信息...")
+        await page.fill('input[type="text"], input[type="email"], input[name="email"], input[placeholder*="邮箱"], input[placeholder*="账号"]', MINIDUO_USER, timeout=10000)
+        await page.fill('input[type="password"], input[name="password"]', MINIDUO_PASS, timeout=10000)
+        print("  ✓ 已填写账号密码")
+        
+        # 步骤4: 点击登录按钮
+        print("  步骤4: 点击登录...")
+        login_btn_selectors = [
+            'button:has-text("登录")',
+            'button:has-text("登 录")',
+            'input[type="submit"]',
+            'button[type="submit"]',
+            '.login-btn',
+            '.btn-login',
+        ]
+        clicked_login = False
+        for selector in login_btn_selectors:
+            try:
+                if await page.locator(selector).count() > 0:
+                    await page.click(selector)
+                    print(f"  ✓ 点击登录按钮")
+                    clicked_login = True
+                    break
+            except:
+                continue
+        
+        if not clicked_login:
+            print("  ! 未找到登录按钮")
+            results['message'] = "未找到登录按钮"
+            return results
+        
+        # 等待登录完成
+        await page.wait_for_load_state('networkidle', timeout=15000)
+        print("  ✓ 登录完成")
+        
+        # 步骤5: 跳转到购物车页面找抽奖
+        print("  步骤5: 跳转购物车页面...")
         await page.goto('https://www.miniduo.cn/cart', wait_until='networkidle', timeout=30000)
         
-        if '登录' in await page.content() or 'login' in page.url:
-            print("  步骤2: 执行登录...")
-            await page.fill('input[name="username"], input[type="text"], input[placeholder*="用户"], input[placeholder*="账号"]', MINIDUO_USER, timeout=5000)
-            await page.fill('input[name="password"], input[type="password"]', MINIDUO_PASS, timeout=5000)
-            await page.click('button[type="submit"], input[type="submit"], button:has-text("登录"), .login-btn', timeout=5000)
-            await page.wait_for_load_state('networkidle', timeout=15000)
-            print("  ✓ 登录完成")
-        else:
-            print("  步骤2: 已登录状态")
-        
-        print("  步骤3: 查找抽奖按钮...")
-        lottery_selectors = ['button:has-text("抽奖")', 'a:has-text("抽奖")', '.lottery-btn', '#lottery', '[class*="lottery"]', '[class*="draw"]', 'button:has-text("签到")']
+        # 步骤6: 查找抽奖按钮
+        print("  步骤6: 查找抽奖按钮...")
+        lottery_selectors = [
+            'button:has-text("抽奖")',
+            'a:has-text("抽奖")',
+            'div:has-text("抽奖")',
+            '.lottery-btn',
+            '#lottery',
+            '[class*="lottery"]',
+            '[class*="draw"]',
+            'button:has-text("签到")',
+        ]
         clicked = False
         for selector in lottery_selectors:
             try:
@@ -222,10 +286,12 @@ async def checkin_miniduo(browser):
         if not clicked:
             print("  ! 未找到抽奖按钮，可能已签到")
         
-        print("  步骤4: 跳转余额页面...")
+        # 步骤7: 跳转余额页面
+        print("  步骤7: 跳转余额页面...")
         await page.goto('https://www.miniduo.cn/addfund', wait_until='networkidle', timeout=30000)
         
-        print("  步骤5: 获取余额信息...")
+        # 步骤8: 获取余额信息
+        print("  步骤8: 获取余额信息...")
         content = await page.content()
         balance_match = re.search(r'(\d+(?:\.\d+)?)\s*元', content)
         if balance_match:
@@ -351,20 +417,39 @@ async def checkin_vps8(browser):
     
     try:
         print("  步骤1: 访问网站...")
-        await page.goto('https://vps8.zz.cd/login', wait_until='networkidle', timeout=30000)
+        # 使用 domcontentloaded 替代 networkidle，避免 CF 验证导致超时
+        await page.goto('https://vps8.zz.cd/login', wait_until='domcontentloaded', timeout=60000)
         
-        await wait_for_cf_verify(page)
+        # 等待页面稳定
+        await asyncio.sleep(5)
+        await wait_for_cf_verify(page, timeout=30000)
         
         print("  步骤2: 执行登录...")
-        await page.fill('input[name="email"], input[name="username"], input[type="text"], input[type="email"]', VPS8_USER, timeout=5000)
-        await page.fill('input[name="password"], input[type="password"]', VPS8_PASS, timeout=5000)
+        await page.fill('input[name="email"], input[name="username"], input[type="text"], input[type="email"]', VPS8_USER, timeout=10000)
+        await page.fill('input[name="password"], input[type="password"]', VPS8_PASS, timeout=10000)
         
         print("  步骤3: 等待 CF Turnstile 验证...")
-        await asyncio.sleep(3)
-        await wait_for_cf_verify(page, timeout=15000)
+        await asyncio.sleep(5)
+        await wait_for_cf_verify(page, timeout=30000)
         
-        await page.click('button[type="submit"], input[type="submit"], button:has-text("登录"), button:has-text("Login")', timeout=5000)
-        await page.wait_for_load_state('networkidle', timeout=15000)
+        # 点击登录
+        login_clicked = False
+        for selector in ['button[type="submit"]', 'input[type="submit"]', 'button:has-text("登录")', 'button:has-text("Login")', '.login-btn']:
+            try:
+                if await page.locator(selector).count() > 0:
+                    await page.click(selector)
+                    print(f"  ✓ 点击登录按钮")
+                    login_clicked = True
+                    break
+            except:
+                continue
+        
+        if not login_clicked:
+            print("  ! 未找到登录按钮")
+            results['message'] = "未找到登录按钮"
+            return results
+        
+        await page.wait_for_load_state('domcontentloaded', timeout=30000)
         print("  ✓ 登录完成")
         
         print("  步骤4: 查找签到按钮...")
@@ -384,7 +469,7 @@ async def checkin_vps8(browser):
             print("  ! 未找到签到按钮，可能已签到")
         
         print("  步骤5: 等待签到后的 CF 验证...")
-        await wait_for_cf_verify(page, timeout=15000)
+        await wait_for_cf_verify(page, timeout=30000)
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         screenshot_path = f"{SCREENSHOT_DIR}/vps8_{timestamp}.png"
