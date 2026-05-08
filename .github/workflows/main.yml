@@ -2,7 +2,7 @@ name: Auto Check-in
 
 on:
   schedule:
-    - cron: '15 0 * * *'
+    - cron: '30 0 * * *'
   workflow_dispatch:
 
 jobs:
@@ -24,8 +24,10 @@ jobs:
           pip install playwright aiohttp
           playwright install chromium
           playwright install-deps chromium
+          # 安装虚拟显示器
+          sudo apt-get install -y xvfb
       
-      - name: Run check-in script
+      - name: Run check-in script with Xvfb
         env:
           MINIDUO_USER: ${{ secrets.MINIDUO_USER }}
           MINIDUO_PASS: ${{ secrets.MINIDUO_PASS }}
@@ -36,15 +38,15 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           SCREENSHOT_DIR: "./screenshots"
+        # 使用 xvfb-run 启动，模拟真实显示设备环境
         run: |
           mkdir -p screenshots
-          python checkin.py
+          xvfb-run --server-args="-screen 0 1280x1024x24" python checkin.py
       
       - name: Upload debug screenshots
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: checkin-debug-logs
-          # 使用绝对相对路径，确保一定能抓到 png 文件
           path: screenshots/*.png
           retention-days: 3
