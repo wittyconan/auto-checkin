@@ -1,33 +1,24 @@
 name: Auto Check-in
-
 on:
   schedule:
     - cron: '30 0 * * *'
   workflow_dispatch:
-
 jobs:
   checkin:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      
       - name: Install dependencies
         run: |
           pip install playwright aiohttp
           playwright install chromium
           playwright install-deps chromium
-          # 安装虚拟显示器
           sudo apt-get install -y xvfb
-      
-      - name: Run check-in script with Xvfb
+      - name: Run with Xvfb
         env:
           MINIDUO_USER: ${{ secrets.MINIDUO_USER }}
           MINIDUO_PASS: ${{ secrets.MINIDUO_PASS }}
@@ -38,15 +29,11 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           SCREENSHOT_DIR: "./screenshots"
-        # 使用 xvfb-run 启动，模拟真实显示设备环境
         run: |
           mkdir -p screenshots
           xvfb-run --server-args="-screen 0 1280x1024x24" python checkin.py
-      
-      - name: Upload debug screenshots
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: checkin-debug-logs
           path: screenshots/*.png
-          retention-days: 3
