@@ -38,63 +38,74 @@ async def send_tg(text):
 # ================= 站点逻辑 =================
 
 async def checkin_miniduo(context):
-    print("【miniduo.cn】开始...")
+    print("【miniduo.cn】执行中...")
     page = await context.new_page()
     await apply_stealth(page)
     try:
         await page.goto('https://www.miniduo.cn/login', timeout=60000)
+        await asyncio.sleep(8) # 硬等页面渲染
+        
+        # 处理可能的白屏：检查内容长度
+        content = await page.content()
+        if len(content) < 500:
+            print("  ! 检测到页面内容过少，尝试刷新...")
+            await page.reload()
+            await asyncio.sleep(10)
+
+        # 切换邮箱登录并输入
         await page.get_by_text("邮箱登录").click()
-        await page.locator('input[placeholder*="邮箱"]').fill(MINIDUO_USER)
-        await page.locator('input[type="password"]').fill(MINIDUO_PASS)
+        await page.locator('input[placeholder*="邮箱"]').click()
+        await page.type('input[placeholder*="邮箱"]', MINIDUO_USER, delay=100)
+        await page.type('input[type="password"]', MINIDUO_PASS, delay=100)
         await page.get_by_role("button", name="登录").click()
         
-        # 登录后跳转购物车页面
         await page.wait_for_url("**/cart", timeout=20000)
         print("  ✓ 登录成功，等待转盘加载...")
-        await asyncio.sleep(10) # 关键：给悬浮转盘充足加载时间
+        await asyncio.sleep(12) 
         
-        # 尝试点击转盘中心的“开始抽奖”
-        lottery_btn = page.get_by_text("开始抽奖")
-        if await lottery_btn.count() > 0:
-            await lottery_btn.first.click(force=True)
-            print("  ✓ 文本点击‘开始抽奖’成功")
-        else:
-            # 备选：根据你的截图分辨率 (1280x800)，模拟右下角坐标点击
-            print("  ! 未找到文本，尝试坐标点击 (1160, 860)...")
-            await page.mouse.click(1160, 860) 
-            
+        # 精准点击转盘中心
+        await page.mouse.click(1160, 860) 
         await asyncio.sleep(3)
-        return True, "已尝试触发抽奖"
+        return True, "已尝试触发坐标点击"
     except Exception as e:
         await save_debug(page, "miniduo_err")
         return False, str(e)[:30]
     finally: await page.close()
 
 async def checkin_svyun(context):
-    print("【svyun.com】开始...")
+    print("【svyun.com】执行中...")
     page = await context.new_page()
     await apply_stealth(page)
     try:
-        # 增加 Referer 伪装，应对 504 屏蔽
-        await page.goto('https://www.svyun.com/plugin/86/index.htm', 
-                        timeout=60000, 
-                        referer="https://www.google.com/")
-        await asyncio.sleep(5)
+        await page.goto('https://www.svyun.com/plugin/86/index.htm', timeout=60000)
+        await asyncio.sleep(8)
         
-        if "504" in await page.title() or "Gateway Timeout" in await page.content():
-            return False, "站点 504 (GitHub IP被禁)"
-
-        await page.locator('input[name="username"]').fill(SVYUN_USER)
-        await page.fill('input[name="password"]', SVYUN_PASS)
-        cb = page.locator('input[type="checkbox"]')
-        if await cb.count() > 0: await cb.first.check()
-        await page.click('button[type="submit"]')
-        await asyncio.sleep(5)
+        # 拟人化输入账号
+        user_box = page.locator('input[name="username"]')
+        await user_box.wait_for(state="visible")
+        await user_box.click() # 先点一下激活
+        await user_box.type(SVYUN_USER, delay=120)
         
+        # 拟人化输入密码
+        pwd_box = page.locator('input[name="password"]')
+        await pwd_box.click()
+        await pwd_box.type(SVYUN_PASS, delay=120)
+        
+        # 勾选协议：直接点击文字部分
+        print("  尝试勾选协议...")
+        agree_text = page.get_by_text("Read and agree")
+        if await agree_text.count() > 0:
+            await agree_text.click()
+        
+        await asyncio.sleep(1)
+        await page.click('button:has-text("Login")')
+        await page.wait_for_load_state('networkidle', timeout=20000)
+        
+        # 点击签到
         btn = page.locator('button:has-text("立即签到"), .checkin-btn')
         if await btn.count() > 0:
             await btn.first.click()
-            return True, "签到成功"
+            return True, "签到点击成功"
         return False, "未找到签到按钮"
     except Exception as e:
         await save_debug(page, "svyun_err")
@@ -102,58 +113,56 @@ async def checkin_svyun(context):
     finally: await page.close()
 
 async def checkin_vps8(context):
-    print("【vps8.zz.cd】开始...")
+    print("【vps8.zz.cd】执行中...")
     page = await context.new_page()
     await apply_stealth(page)
     try:
         await page.goto('https://vps8.zz.cd/login', timeout=60000)
-        
-        # 识别维护页面
-        if "维护" in await page.content():
-            return False, "站点维护中"
+        if "维护" in await page.content(): return False, "站点维护"
 
-        # 硬等 CF 验证
-        for _ in range(3):
+        # 处理 CF 盾
+        for _ in range(5):
             if "Just a moment" in await page.title():
+                print("  等待 CF 验证中...")
                 await asyncio.sleep(10)
             else: break
         
-        await page.locator('input[name="email"]').wait_for(state="visible", timeout=20000)
-        await page.type('input[name="email"]', VPS8_USER, delay=100)
+        await page.locator('input[name="email"]').type(VPS8_USER, delay=100)
         await page.type('input[name="password"]', VPS8_PASS, delay=100)
         await page.get_by_role("button", name=re.compile("登录|Login")).click()
-        await asyncio.sleep(8)
         
+        await asyncio.sleep(10)
         btn = page.locator('button:has-text("签到"), #checkin')
         if await btn.count() > 0:
             await btn.first.click()
-            return True, "签到成功"
+            return True, "签到完成"
         return False, "未找到按钮"
     except Exception as e:
         await save_debug(page, "vps8_err")
         return False, str(e)[:30]
     finally: await page.close()
 
-# ================= 主流程 =================
+# ================= 主入口 =================
 
 async def main():
     if not os.path.exists(SCREENSHOT_DIR): os.makedirs(SCREENSHOT_DIR)
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
+        # 统一设置视口分辨率，保证坐标点击的一致性
         context = await browser.new_context(
-            viewport={'width': 1280, 'height': 800}, # 必须固定分辨率以保证坐标点击准确
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            viewport={'width': 1280, 'height': 800},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
         
         results = {}
-        # 顺序执行
+        # 改为顺序执行，每个任务之间留出呼吸时间
         results['miniduo'] = await checkin_miniduo(context)
-        await asyncio.sleep(5)
+        await asyncio.sleep(10)
         results['svyun'] = await checkin_svyun(context)
-        await asyncio.sleep(5)
+        await asyncio.sleep(10)
         results['vps8'] = await checkin_vps8(context)
         
-        report = f"🔔 <b>自动签到报告 [{datetime.now().strftime('%H:%M')}]</b>\n"
+        report = f"🔔 <b>自动签到报告 [{datetime.now().strftime('%m-%d %H:%M')}]</b>\n"
         for s, (ok, msg) in results.items():
             report += f"{'✅' if ok else '❌'} {s}: {msg}\n"
         
