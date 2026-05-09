@@ -1,6 +1,8 @@
-# 自动签到脚本
+# 速云自动签到脚本
 
-多网站自动签到，支持 GitHub Actions 每日自动执行，支持 Telegram 机器人通知。
+速云自动签到，支持 GitHub Actions 每日自动执行，支持 Telegram 机器人通知。
+网址：（包含AFF）
+https://www.svyun.com/recommend/Abetl6uiQauK
 
 ## 支持网站
 
