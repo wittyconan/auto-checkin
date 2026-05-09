@@ -20,12 +20,8 @@ jobs:
           sudo apt-get install -y xvfb
       - name: Run with Xvfb
         env:
-          MINIDUO_USER: ${{ secrets.MINIDUO_USER }}
-          MINIDUO_PASS: ${{ secrets.MINIDUO_PASS }}
           SVYUN_USER: ${{ secrets.SVYUN_USER }}
           SVYUN_PASS: ${{ secrets.SVYUN_PASS }}
-          VPS8_USER: ${{ secrets.VPS8_USER }}
-          VPS8_PASS: ${{ secrets.VPS8_PASS }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           SCREENSHOT_DIR: "./screenshots"
