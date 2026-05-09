@@ -6,9 +6,7 @@
 
 | 网站 | 功能 |
 |------|------|
-| miniduo.cn | 抽奖 → 获取余额 |
 | svyun.com | 签到 → 查看详情 |
-| vps8.zz.cd | 签到（含 CF 验证） |
 
 ## 快速开始
 
@@ -24,12 +22,8 @@
 
 | Secret 名称 | 说明 | 必填 |
 |-------------|------|------|
-| `MINIDUO_USER` | miniduo.cn 用户名 | 否 |
-| `MINIDUO_PASS` | miniduo.cn 密码 | 否 |
 | `SVYUN_USER` | svyun.com 用户名 | 否 |
 | `SVYUN_PASS` | svyun.com 密码 | 否 |
-| `VPS8_USER` | vps8.zz.cd 用户名 | 否 |
-| `VPS8_PASS` | vps8.zz.cd 密码 | 否 |
 | `TG_BOT_TOKEN` | Telegram Bot Token | 否 |
 | `TG_CHAT_ID` | Telegram Chat ID | 否 |
 
@@ -87,11 +81,9 @@ schedule:
 🔔 自动签到报告
 📅 时间: 2025-05-08 08:00:00
 
-✅ miniduo.cn: 成功 | 余额 123.45 元
 ✅ svyun.com: 成功
-❌ vps8.zz.cd: 失败
 
-📊 统计: 成功 2 | 失败 1 | 跳过 0
+📊 统计: 成功 1 | 失败 0 | 跳过 0
 ```
 
 ## 本地运行
@@ -102,8 +94,8 @@ pip install -r requirements.txt
 playwright install chromium
 
 # 设置环境变量
-export MINIDUO_USER="your_username"
-export MINIDUO_PASS="your_password"
+export SVYUN_USER="your_username"
+export SVYUN_PASS="your_password"
 export TG_BOT_TOKEN="your_bot_token"
 export TG_CHAT_ID="your_chat_id"
 # ... 其他账号
@@ -114,13 +106,9 @@ python checkin.py
 
 ## 注意事项
 
-1. **Cloudflare 验证**：vps8.zz.cd 使用 CF Turnstile，headless 模式下可能无法自动通过。如遇问题，可尝试：
-   - 使用 `headless=False` 本地调试
-   - 或考虑使用第三方 CF 绕过服务
+1. **元素选择器**：网站更新后可能导致选择器失效，需要检查并更新脚本中的 CSS 选择器。
 
-2. **元素选择器**：网站更新后可能导致选择器失效，需要检查并更新脚本中的 CSS 选择器。
-
-3. **账号安全**：密码存储在 GitHub Secrets 中，相对安全，但建议使用独立密码。
+2. **账号安全**：密码存储在 GitHub Secrets 中，相对安全，但建议使用独立密码。
 
 ## 文件结构
 
