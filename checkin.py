@@ -16,10 +16,16 @@ TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', '')
 TG_CHAT_ID = os.getenv('TG_CHAT_ID', '')
 SCREENSHOT_DIR = os.getenv('SCREENSHOT_DIR', './screenshots')
 
+# ================= 防崩溃工具函数 =================
 async def save_debug(page, name):
     path = f"{SCREENSHOT_DIR}/debug_{name}_{datetime.now().strftime('%H%M%S')}.png"
-    await page.screenshot(path=path, full_page=True)
-    return path
+    try:
+        # 【核心修复】：去掉 full_page=True，增加 5000ms 硬超时，防止截图卡死整个程序
+        await page.screenshot(path=path, timeout=5000)
+        return path
+    except Exception as e:
+        print(f"  [截图失败，忽略报错] {e}")
+        return None
 
 async def send_tg(text, photo=None):
     if not TG_BOT_TOKEN: return
@@ -40,14 +46,13 @@ async def send_tg(text, photo=None):
 # ================= 站点逻辑 =================
 
 async def checkin_miniduo(context):
-    print("【miniduo.cn】基于稳定版重构弹窗处理...")
+    print("【miniduo.cn】IP连通性测试 (快照版)...")
     page = await context.new_page()
     try:
-        # 恢复 60 秒长等待
-        await page.goto('https://www.miniduo.cn/login', timeout=60000)
+        # Miniduo 已实锤封锁 Actions IP，这里改为 20 秒快速失败，不再白白浪费时间
+        await page.goto('https://www.miniduo.cn/login', timeout=20000)
         await asyncio.sleep(5) 
 
-        # 原始成功的登录逻辑
         email_tab = page.locator('text=邮箱登录')
         if await email_tab.count() > 0:
             await email_tab.click()
@@ -56,43 +61,35 @@ async def checkin_miniduo(context):
         await page.locator('input[type="password"]').fill(MINIDUO_PASS)
         await page.get_by_role("button", name=re.compile("登录|Login")).first.click()
         
-        # 稳定等待购物车页面
-        await page.wait_for_url("**/cart", timeout=30000)
-        print("  ✓ 登录成功，等待弹窗与转盘...")
-        await asyncio.sleep(10) # 必须死等10秒，让公告弹窗出来
+        await page.wait_for_url("**/cart", timeout=20000)
+        await asyncio.sleep(10)
         
-        # 处理弹窗：兼容“我知道了”和“我已了解”，非阻塞
         notice1 = page.locator('text="我知道了"')
         notice2 = page.locator('text="我已了解"')
         
         if await notice1.count() > 0:
             await notice1.first.click(force=True)
-            print("  ✓ 关闭 [我知道了] 弹窗")
             await asyncio.sleep(2)
         elif await notice2.count() > 0:
             await notice2.first.click(force=True)
-            print("  ✓ 关闭 [我已了解] 弹窗")
             await asyncio.sleep(2)
             
-        # 狙击抽奖
         lottery_btn = page.locator('text="开始抽奖"')
         if await lottery_btn.count() > 0:
             await lottery_btn.first.click(force=True)
-            print("  ✓ 文本点击 [开始抽奖]")
         else:
             await page.mouse.click(1160, 860) 
-            print("  ✓ 坐标点击 [开始抽奖]")
             
         await asyncio.sleep(5) 
         return True, "已触发抽奖", await save_debug(page, "miniduo_ok")
     except Exception as e:
-        return False, f"错误:{str(e)[:20]}", await save_debug(page, "miniduo_err")
+        return False, f"错误:{str(e)[:15]} (大概率IP被封)", await save_debug(page, "miniduo_err")
     finally: await page.close()
 
 
-# ⚠️ 绝对冷冻区：Svyun 已稳定，绝不修改一行代码 ⚠️
+# ⚠️ 绝对冷冻区：Svyun 内部逻辑一行未动 ⚠️
 async def checkin_svyun(context):
-    print("【svyun.com】物理键盘级输入法 (稳定态，不作更改)...")
+    print("【svyun.com】物理键盘级输入法 (稳定态)...")
     page = await context.new_page()
     try:
         await page.goto('https://www.svyun.com/plugin/86/index.htm', timeout=60000)
@@ -147,28 +144,22 @@ async def checkin_vps8(context):
         await page.locator('input[name="password"]').press_sequentially(VPS8_PASS, delay=50)
         
         print("  正在寻找 Turnstile 验证框...")
-        # 降维打击：不使用 frame_locator，而是直接获取 iframe 元素本身在网页上的物理坐标
         iframe_element = page.locator('iframe[src*="challenges.cloudflare.com"]').first
         
         try:
-            # 等待盾牌加载
             await iframe_element.wait_for(state="visible", timeout=15000)
-            await asyncio.sleep(5) # 必须等它内部画完
+            await asyncio.sleep(5) 
             
-            # 获取盾牌在整个屏幕上的物理边界框 (X, Y 坐标)
             box = await iframe_element.bounding_box()
             if box:
                 print("  ✓ 捕获盾牌物理坐标，执行强制鼠标点击...")
-                # 盾牌框宽约 300px，复选框位于左侧。
-                # 物理坐标：X 轴往右偏移 30 像素，Y 轴在中心偏上一点。
                 click_x = box['x'] + 30
                 click_y = box['y'] + (box['height'] / 2)
                 
-                # 移动过去并点击
                 await page.mouse.move(click_x, click_y)
                 await asyncio.sleep(0.5)
                 await page.mouse.click(click_x, click_y, delay=150)
-                await asyncio.sleep(5) # 等待验证圈转完
+                await asyncio.sleep(5) 
         except Exception as ex:
             print(f"  ! 验证框处理失败或未出现: {ex}")
             
@@ -192,11 +183,16 @@ async def main():
         browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-blink-features=AutomationControlled'])
         context = await browser.new_context(viewport={'width': 1280, 'height': 1024})
         
+        # 将任务包装在 try-except 中，确保绝对的隔离
         for name, func in [('Miniduo', checkin_miniduo), ('Svyun', checkin_svyun), ('VPS8', checkin_vps8)]:
-            ok, msg, ss = await func(context)
-            status = "✅" if ok else "❌"
-            await send_tg(f"{status} <b>{name}</b>: {msg}", photo=ss)
-            await asyncio.sleep(5)
+            try:
+                ok, msg, ss = await func(context)
+                status = "✅" if ok else "❌"
+                await send_tg(f"{status} <b>{name}</b>: {msg}", photo=ss)
+            except Exception as global_e:
+                await send_tg(f"❌ <b>{name}</b>: 发生致命崩溃 ({str(global_e)[:20]})")
+            finally:
+                await asyncio.sleep(5)
             
         await browser.close()
 
