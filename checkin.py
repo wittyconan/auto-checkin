@@ -16,7 +16,6 @@ TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', '')
 TG_CHAT_ID = os.getenv('TG_CHAT_ID', '')
 SCREENSHOT_DIR = os.getenv('SCREENSHOT_DIR', './screenshots')
 
-# ================= 工具函数 =================
 async def save_debug(page, name):
     path = f"{SCREENSHOT_DIR}/debug_{name}_{datetime.now().strftime('%H%M%S')}.png"
     await page.screenshot(path=path, full_page=True)
@@ -38,109 +37,109 @@ async def send_tg(text, photo=None):
                                    json={'chat_id': TG_CHAT_ID, 'text': text, 'parse_mode': 'HTML'})
         except Exception as e: print(f"  [TG失败] {e}")
 
-async def human_click(page, locator):
-    """模拟真人轨迹点击，绕过 CF Turnstile 检测"""
-    box = await locator.bounding_box()
-    if box:
-        x = box['x'] + box['width'] / 2
-        y = box['y'] + box['height'] / 2
-        await page.mouse.move(x - 5, y - 5)
-        await asyncio.sleep(0.3)
-        await page.mouse.click(x, y, delay=150)
-
 # ================= 站点逻辑 =================
 
 async def checkin_miniduo(context):
-    print("【miniduo.cn】执行双重点击...")
+    print("【miniduo.cn】测试 IP 连通性...")
     page = await context.new_page()
     try:
-        await page.goto('https://www.miniduo.cn/login', timeout=60000)
-        await page.wait_for_selector('text=邮箱登录', timeout=20000)
+        # 缩短超时时间，因为如果是白屏，等再久也没用
+        response = await page.goto('https://www.miniduo.cn/login', timeout=20000)
+        await asyncio.sleep(5)
+        
+        if len(await page.content()) < 500:
+            return False, "IP被墙(纯白屏)", await save_debug(page, "miniduo_block")
+
         await page.get_by_text("邮箱登录").click()
         await page.locator('input[placeholder*="邮箱"]').fill(MINIDUO_USER)
         await page.locator('input[type="password"]').fill(MINIDUO_PASS)
         await page.get_by_role("button", name="登录").click()
         
-        await page.wait_for_url("**/cart", timeout=20000)
-        await asyncio.sleep(10) # 等待公告加载
-        
-        # 1. 关公告
-        notice = page.get_by_text("我知道了")
-        if await notice.count() > 0:
-            await notice.click()
-            await asyncio.sleep(2)
-            
-        # 2. 抽奖 (先试文本，再试坐标)
-        btn = page.get_by_text("开始抽奖")
-        if await btn.count() > 0:
-            await btn.first.click(force=True)
-        else:
-            await page.mouse.click(1160, 860) 
-            
-        await asyncio.sleep(3)
+        await page.wait_for_url("**/cart", timeout=15000)
+        await asyncio.sleep(8) 
+        try: await page.get_by_text("我知道了").click(timeout=3000)
+        except: pass
+        await page.mouse.click(1160, 860) 
         return True, "已尝试触发", await save_debug(page, "miniduo_ok")
     except Exception as e:
         return False, f"错误:{str(e)[:15]}", await save_debug(page, "miniduo_err")
     finally: await page.close()
 
 async def checkin_svyun(context):
-    print("【svyun.com】监听注入并抓取详情...")
+    print("【svyun.com】物理键盘级输入法...")
     page = await context.new_page()
     try:
         await page.goto('https://www.svyun.com/plugin/86/index.htm', timeout=60000)
-        # 解决Loading死锁：显式等待登录框
-        await page.wait_for_selector('input[placeholder*="Email"]', timeout=30000)
-        
-        await page.evaluate(f"""() => {{
-            const inputs = document.querySelectorAll('input');
-            const u = Array.from(inputs).find(i => i.placeholder?.includes('Email'));
-            const p = Array.from(inputs).find(i => i.type === 'password');
-            if(u) u.value = '{SVYUN_USER}';
-            if(p) p.value = '{SVYUN_PASS}';
-            document.querySelector('input[type="checkbox"]')?.click();
-        }}""")
-        await page.locator('button:has-text("Login")').first.click()
+        # 等待页面上的 Loading 完全消失
         await asyncio.sleep(10)
         
-        # 签到
-        await page.locator('button:has-text("立即签到"), .checkin-btn').first.click()
-        await asyncio.sleep(5)
+        # 1. 点击账号框 -> 模拟真实敲击
+        user_input = page.locator('input[placeholder*="Email"]').first
+        await user_input.wait_for(state="visible")
+        await user_input.click()
+        await user_input.clear()
+        await user_input.press_sequentially(SVYUN_USER, delay=100) # 延迟100ms敲一个字
         
-        # 抓取次数与详情
-        await page.goto('https://www.svyun.com/plugin/94/draw.htm?id=2')
-        await asyncio.sleep(5)
-        text = await page.inner_text("body")
-        count = re.search(r"剩余抽奖次数\s*(\d+)\s*次", text)
-        msg = f"剩余:{count.group(1)}次" if count else "签到成功"
+        # 2. 点击密码框 -> 模拟真实敲击
+        pass_input = page.locator('input[type="password"]')
+        await pass_input.click()
+        await pass_input.clear()
+        await pass_input.press_sequentially(SVYUN_PASS, delay=100)
         
-        # 点击查看详情并截图
-        try:
-            await page.get_by_text("查看详情").click(timeout=5000)
-            await asyncio.sleep(2)
-        except: pass
+        # 3. 勾选并登录
+        await page.get_by_text("Read and agree").click()
+        await asyncio.sleep(1)
+        await page.locator('button:has-text("Login")').first.click()
         
-        return True, msg, await save_debug(page, "svyun_res")
+        await asyncio.sleep(10)
+        # 签到逻辑
+        btn = page.locator('button:has-text("立即签到"), .checkin-btn')
+        if await btn.count() > 0:
+            await btn.first.click()
+            await asyncio.sleep(5)
+            
+            # 抓取次数
+            await page.goto('https://www.svyun.com/plugin/94/draw.htm?id=2')
+            await asyncio.sleep(5)
+            text = await page.inner_text("body")
+            count = re.search(r"剩余抽奖次数\s*(\d+)\s*次", text)
+            msg = f"剩余:{count.group(1)}次" if count else "签到成功"
+            
+            try: await page.get_by_text("查看详情").click(timeout=5000); await asyncio.sleep(2)
+            except: pass
+            
+            return True, msg, await save_debug(page, "svyun_res")
+        return False, "未见签到按钮", await save_debug(page, "svyun_fail")
     except Exception as e:
         return False, f"错误:{str(e)[:15]}", await save_debug(page, "svyun_err")
     finally: await page.close()
 
 async def checkin_vps8(context):
-    print("【vps8.zz.cd】模拟真人点击验证...")
+    print("【vps8.zz.cd】精准狙击 CF 验证框...")
     page = await context.new_page()
     try:
         await page.goto('https://vps8.zz.cd/login', timeout=60000)
-        await page.wait_for_selector('input[name="email"]', timeout=20000)
+        await asyncio.sleep(5)
         
-        await page.evaluate(f"""() => {{
-            document.querySelector('input[name="email"]').value = '{VPS8_USER}';
-            document.querySelector('input[name="password"]').value = '{VPS8_PASS}';
-        }}""")
+        # 同样使用真实敲击
+        await page.locator('input[name="email"]').press_sequentially(VPS8_USER, delay=50)
+        await page.locator('input[name="password"]').press_sequentially(VPS8_PASS, delay=50)
         
-        # 探测并模拟点击 CF 验证框
+        print("  正在寻找 Turnstile 验证框...")
+        # 等待 iframe 出现
+        await page.wait_for_selector('iframe[src*="challenges.cloudflare.com"]', state="attached", timeout=15000)
         cf_frame = page.frame_locator('iframe[src*="challenges.cloudflare.com"]')
-        if await cf_frame.locator('body').count() > 0:
-            await human_click(page, cf_frame.locator('body'))
-            await asyncio.sleep(5)
+        
+        # 给 CF 盾一点时间加载内部的复选框
+        await asyncio.sleep(5)
+        
+        # 强行点击 iframe 内部偏左的位置（通常是那个小方框的所在处）
+        target = cf_frame.locator('body')
+        if await target.count() > 0:
+            print("  ✓ 找到盾牌，执行偏移点击...")
+            # x:20, y:20 通常能精准点到那个框
+            await target.click(position={"x": 20, "y": 20}, delay=200)
+            await asyncio.sleep(5) # 等绿圈转完
             
         await page.locator('button:has-text("登录")').first.click()
         await asyncio.sleep(10)
@@ -166,7 +165,7 @@ async def main():
             ok, msg, ss = await func(context)
             status = "✅" if ok else "❌"
             await send_tg(f"{status} <b>{name}</b>: {msg}", photo=ss)
-            await asyncio.sleep(10)
+            await asyncio.sleep(5)
             
         await browser.close()
 
