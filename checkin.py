@@ -40,65 +40,83 @@ async def send_tg(text, photo=None):
 # ================= 站点逻辑 =================
 
 async def checkin_miniduo(context):
-    print("【miniduo.cn】测试 IP 连通性...")
+    print("【miniduo.cn】使用历史稳定基准版...")
     page = await context.new_page()
     try:
-        # 缩短超时时间，因为如果是白屏，等再久也没用
-        response = await page.goto('https://www.miniduo.cn/login', timeout=20000)
-        await asyncio.sleep(5)
-        
-        if len(await page.content()) < 500:
-            return False, "IP被墙(纯白屏)", await save_debug(page, "miniduo_block")
+        # 恢复 60 秒长等待，不再提前掐断
+        await page.goto('https://www.miniduo.cn/login', timeout=60000)
+        await asyncio.sleep(5) # 给页面充足的渲染时间
 
-        await page.get_by_text("邮箱登录").click()
+        # 原始成功版的登录逻辑
+        email_tab = page.locator('text=邮箱登录')
+        if await email_tab.count() > 0:
+            await email_tab.click()
+            
         await page.locator('input[placeholder*="邮箱"]').fill(MINIDUO_USER)
         await page.locator('input[type="password"]').fill(MINIDUO_PASS)
-        await page.get_by_role("button", name="登录").click()
+        await page.get_by_role("button", name=re.compile("登录|Login")).first.click()
         
-        await page.wait_for_url("**/cart", timeout=15000)
-        await asyncio.sleep(8) 
-        try: await page.get_by_text("我知道了").click(timeout=3000)
-        except: pass
-        await page.mouse.click(1160, 860) 
-        return True, "已尝试触发", await save_debug(page, "miniduo_ok")
+        # 稳定等待购物车页面
+        await page.wait_for_url("**/cart", timeout=30000)
+        print("  ✓ 登录成功，等待弹窗与转盘...")
+        await asyncio.sleep(10) # 必须死等10秒，让那个公告弹窗出来
+        
+        # 处理弹窗：兼容“我知道了”和“我已了解”
+        notice1 = page.locator('text="我知道了"')
+        notice2 = page.locator('text="我已了解"')
+        
+        if await notice1.count() > 0:
+            await notice1.first.click()
+            print("  ✓ 关闭 [我知道了] 弹窗")
+            await asyncio.sleep(2)
+        elif await notice2.count() > 0:
+            await notice2.first.click()
+            print("  ✓ 关闭 [我已了解] 弹窗")
+            await asyncio.sleep(2)
+            
+        # 抽奖点击
+        lottery_btn = page.locator('text="开始抽奖"')
+        if await lottery_btn.count() > 0:
+            await lottery_btn.first.click(force=True)
+            print("  ✓ 文本点击 [开始抽奖]")
+        else:
+            await page.mouse.click(1160, 860) 
+            print("  ✓ 坐标点击 [开始抽奖]")
+            
+        await asyncio.sleep(5) # 等转盘转完
+        return True, "已触发抽奖", await save_debug(page, "miniduo_ok")
     except Exception as e:
-        return False, f"错误:{str(e)[:15]}", await save_debug(page, "miniduo_err")
+        return False, f"错误:{str(e)[:20]}", await save_debug(page, "miniduo_err")
     finally: await page.close()
 
 async def checkin_svyun(context):
-    print("【svyun.com】物理键盘级输入法...")
+    print("【svyun.com】物理键盘级输入法 (稳定态，不作更改)...")
     page = await context.new_page()
     try:
         await page.goto('https://www.svyun.com/plugin/86/index.htm', timeout=60000)
-        # 等待页面上的 Loading 完全消失
         await asyncio.sleep(10)
         
-        # 1. 点击账号框 -> 模拟真实敲击
         user_input = page.locator('input[placeholder*="Email"]').first
         await user_input.wait_for(state="visible")
         await user_input.click()
         await user_input.clear()
-        await user_input.press_sequentially(SVYUN_USER, delay=100) # 延迟100ms敲一个字
+        await user_input.press_sequentially(SVYUN_USER, delay=100)
         
-        # 2. 点击密码框 -> 模拟真实敲击
         pass_input = page.locator('input[type="password"]')
         await pass_input.click()
         await pass_input.clear()
         await pass_input.press_sequentially(SVYUN_PASS, delay=100)
         
-        # 3. 勾选并登录
         await page.get_by_text("Read and agree").click()
         await asyncio.sleep(1)
         await page.locator('button:has-text("Login")').first.click()
         
         await asyncio.sleep(10)
-        # 签到逻辑
         btn = page.locator('button:has-text("立即签到"), .checkin-btn')
         if await btn.count() > 0:
             await btn.first.click()
             await asyncio.sleep(5)
             
-            # 抓取次数
             await page.goto('https://www.svyun.com/plugin/94/draw.htm?id=2')
             await asyncio.sleep(5)
             text = await page.inner_text("body")
@@ -115,31 +133,35 @@ async def checkin_svyun(context):
     finally: await page.close()
 
 async def checkin_vps8(context):
-    print("【vps8.zz.cd】精准狙击 CF 验证框...")
+    print("【vps8.zz.cd】网络重试与精准狙击...")
     page = await context.new_page()
     try:
-        await page.goto('https://vps8.zz.cd/login', timeout=60000)
+        # 加入网络层面的重试机制，应对 net: 错误
+        for attempt in range(2):
+            try:
+                await page.goto('https://vps8.zz.cd/login', timeout=60000)
+                break # 成功则跳出循环
+            except Exception as e:
+                if "net::" in str(e) and attempt == 0:
+                    print("  ! 网络连接被阻断，重试中...")
+                    await asyncio.sleep(5)
+                else: raise e
+                
         await asyncio.sleep(5)
-        
-        # 同样使用真实敲击
         await page.locator('input[name="email"]').press_sequentially(VPS8_USER, delay=50)
         await page.locator('input[name="password"]').press_sequentially(VPS8_PASS, delay=50)
         
         print("  正在寻找 Turnstile 验证框...")
-        # 等待 iframe 出现
-        await page.wait_for_selector('iframe[src*="challenges.cloudflare.com"]', state="attached", timeout=15000)
-        cf_frame = page.frame_locator('iframe[src*="challenges.cloudflare.com"]')
-        
-        # 给 CF 盾一点时间加载内部的复选框
-        await asyncio.sleep(5)
-        
-        # 强行点击 iframe 内部偏左的位置（通常是那个小方框的所在处）
-        target = cf_frame.locator('body')
-        if await target.count() > 0:
-            print("  ✓ 找到盾牌，执行偏移点击...")
-            # x:20, y:20 通常能精准点到那个框
-            await target.click(position={"x": 20, "y": 20}, delay=200)
-            await asyncio.sleep(5) # 等绿圈转完
+        try:
+            await page.wait_for_selector('iframe[src*="challenges.cloudflare.com"]', state="attached", timeout=15000)
+            cf_frame = page.frame_locator('iframe[src*="challenges.cloudflare.com"]')
+            await asyncio.sleep(5)
+            target = cf_frame.locator('body')
+            if await target.count() > 0:
+                print("  ✓ 找到盾牌，执行偏移点击...")
+                await target.click(position={"x": 20, "y": 20}, delay=200)
+                await asyncio.sleep(5) 
+        except: pass # 如果没出验证码就算了，继续往下走
             
         await page.locator('button:has-text("登录")').first.click()
         await asyncio.sleep(10)
@@ -150,7 +172,7 @@ async def checkin_vps8(context):
             return True, "签到成功", await save_debug(page, "vps8_ok")
         return False, "未见按钮", await save_debug(page, "vps8_err")
     except Exception as e:
-        return False, f"错误:{str(e)[:15]}", await save_debug(page, "vps8_err")
+        return False, f"错误:{str(e)[:20]}", await save_debug(page, "vps8_err")
     finally: await page.close()
 
 # ================= 主流程 =================
