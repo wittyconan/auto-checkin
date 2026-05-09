@@ -49,58 +49,68 @@ async def send_tg(text, photo=None):
 # ================= Svyun 独尊版 =================
 
 async def checkin_svyun(context):
-    print("【svyun.com】物理键盘级输入法 (稳定态，绝不修改)...")
+    print("【svyun.com】物理键盘级输入法 (登录态绝对不改)...")
     page = await context.new_page()
     try:
         await page.goto('https://www.svyun.com/plugin/86/index.htm', timeout=60000)
         await asyncio.sleep(10)
         
-        # 1. 物理点击并清空填入账号
+        # 1. 物理点击并清空填入账号 (原汁原味)
         user_input = page.locator('input[placeholder*="Email"]').first
         await user_input.wait_for(state="visible")
         await user_input.click()
         await user_input.clear()
         await user_input.press_sequentially(SVYUN_USER, delay=100)
         
-        # 2. 物理点击并清空填入密码
+        # 2. 物理点击并清空填入密码 (原汁原味)
         pass_input = page.locator('input[type="password"]')
         await pass_input.click()
         await pass_input.clear()
         await pass_input.press_sequentially(SVYUN_PASS, delay=100)
         
-        # 3. 勾选并登录
+        # 3. 勾选并登录 (原汁原味)
         await page.get_by_text("Read and agree").click()
         await asyncio.sleep(1)
         await page.locator('button:has-text("Login")').first.click()
         
         await asyncio.sleep(10)
-        # 4. 签到逻辑
-        btn = page.locator('button:has-text("立即签到"), .checkin-btn')
-        if await btn.count() > 0:
-            await btn.first.click()
-            await asyncio.sleep(5)
-            
-            # 5. 跳转抽奖页获取次数
-            await page.goto('https://www.svyun.com/plugin/94/draw.htm?id=2')
-            await asyncio.sleep(5)
-            text = await page.inner_text("body")
-            count = re.search(r"剩余抽奖次数\s*(\d+)\s*次", text)
-            msg = f"剩余:{count.group(1)}次" if count else "签到成功"
-            
-            # 6. 点击详情并准备局部截图
-            target_modal = None
-            try: 
-                await page.get_by_text("查看详情").click(timeout=5000)
-                await asyncio.sleep(2)
-                # 尝试捕捉弹出的详情面板（覆盖常见前端框架的模态框 class）
-                dialogs = page.locator('.layui-layer, .el-dialog, .modal-content, [role="dialog"]')
-                if await dialogs.count() > 0:
-                    target_modal = dialogs.first
-            except: pass
-            
-            return True, msg, await save_debug(page, "svyun_res", clip_element=target_modal)
         
-        return False, "未见签到按钮", await save_debug(page, "svyun_fail")
+        # 4. 显式跳转到你指定的签到页面
+        await page.goto('https://www.svyun.com/plugin/94/index.htm')
+        await asyncio.sleep(5)
+        
+        # 兼容处理：检查按钮是“立即签到”还是“已签到”
+        btn_sign = page.locator('button:has-text("立即签到"), .checkin-btn')
+        btn_signed = page.locator('button:has-text("已签到")')
+        
+        if await btn_sign.count() > 0:
+            await btn_sign.first.click()
+            await asyncio.sleep(5)
+        elif await btn_signed.count() > 0:
+            print("  ✓ 今日已经签到过，直接去抽奖页截图")
+        else:
+            return False, "未见签到按钮", await save_debug(page, "svyun_fail")
+            
+        # 5. 跳转抽奖页获取次数
+        await page.goto('https://www.svyun.com/plugin/94/draw.htm?id=2')
+        await asyncio.sleep(5)
+        text = await page.inner_text("body")
+        count = re.search(r"剩余抽奖次数\s*(\d+)\s*次", text)
+        msg = f"剩余:{count.group(1)}次" if count else "签到成功(或已签到)"
+        
+        # 6. 点击详情并准备局部截图
+        target_modal = None
+        try: 
+            await page.get_by_text("查看详情").click(timeout=5000)
+            await asyncio.sleep(2)
+            # 尝试捕捉弹出的详情面板
+            dialogs = page.locator('.layui-layer, .el-dialog, .modal-content, [role="dialog"]')
+            if await dialogs.count() > 0:
+                target_modal = dialogs.first
+        except: pass
+        
+        return True, msg, await save_debug(page, "svyun_res", clip_element=target_modal)
+        
     except Exception as e:
         return False, f"错误:{str(e)[:15]}", await save_debug(page, "svyun_err")
     finally: await page.close()
