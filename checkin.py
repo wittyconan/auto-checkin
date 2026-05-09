@@ -16,15 +16,14 @@ TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', '')
 TG_CHAT_ID = os.getenv('TG_CHAT_ID', '')
 SCREENSHOT_DIR = os.getenv('SCREENSHOT_DIR', './screenshots')
 
-# ================= 防崩溃工具函数 =================
+# ================= 工具函数 =================
 async def save_debug(page, name):
     path = f"{SCREENSHOT_DIR}/debug_{name}_{datetime.now().strftime('%H%M%S')}.png"
     try:
-        # 【核心修复】：去掉 full_page=True，增加 5000ms 硬超时，防止截图卡死整个程序
         await page.screenshot(path=path, timeout=5000)
         return path
     except Exception as e:
-        print(f"  [截图失败，忽略报错] {e}")
+        print(f"  [截图超时忽略] {e}")
         return None
 
 async def send_tg(text, photo=None):
@@ -46,76 +45,77 @@ async def send_tg(text, photo=None):
 # ================= 站点逻辑 =================
 
 async def checkin_miniduo(context):
-    print("【miniduo.cn】IP连通性测试 (快照版)...")
+    print("【miniduo.cn】快照探测 (GitHub IP大概率已死)...")
     page = await context.new_page()
     try:
-        # Miniduo 已实锤封锁 Actions IP，这里改为 20 秒快速失败，不再白白浪费时间
-        await page.goto('https://www.miniduo.cn/login', timeout=20000)
-        await asyncio.sleep(5) 
-
-        email_tab = page.locator('text=邮箱登录')
-        if await email_tab.count() > 0:
-            await email_tab.click()
+        # 15秒快速探测，不行直接报错跳过，不浪费生命
+        await page.goto('https://www.miniduo.cn/login', timeout=15000)
+        await asyncio.sleep(3)
+        if len(await page.content()) < 500:
+            return False, "IP已被完全封锁 (白屏)", None
             
+        # 如果奇迹般地进去了，执行历史成功逻辑
+        await page.get_by_text("邮箱登录").click()
         await page.locator('input[placeholder*="邮箱"]').fill(MINIDUO_USER)
         await page.locator('input[type="password"]').fill(MINIDUO_PASS)
         await page.get_by_role("button", name=re.compile("登录|Login")).first.click()
         
         await page.wait_for_url("**/cart", timeout=20000)
-        await asyncio.sleep(10)
+        await asyncio.sleep(8)
         
-        notice1 = page.locator('text="我知道了"')
-        notice2 = page.locator('text="我已了解"')
-        
-        if await notice1.count() > 0:
-            await notice1.first.click(force=True)
-            await asyncio.sleep(2)
-        elif await notice2.count() > 0:
-            await notice2.first.click(force=True)
-            await asyncio.sleep(2)
-            
-        lottery_btn = page.locator('text="开始抽奖"')
-        if await lottery_btn.count() > 0:
-            await lottery_btn.first.click(force=True)
+        for notice in ['我知道了', '我已了解']:
+            el = page.locator(f'text="{notice}"')
+            if await el.count() > 0:
+                await el.first.click(force=True)
+                await asyncio.sleep(2)
+                break
+                
+        lottery = page.locator('text="开始抽奖"')
+        if await lottery.count() > 0:
+            await lottery.first.click(force=True)
         else:
             await page.mouse.click(1160, 860) 
             
         await asyncio.sleep(5) 
         return True, "已触发抽奖", await save_debug(page, "miniduo_ok")
     except Exception as e:
-        return False, f"错误:{str(e)[:15]} (大概率IP被封)", await save_debug(page, "miniduo_err")
+        return False, f"超时/墙拦截 ({str(e)[:15]})", await save_debug(page, "miniduo_err")
     finally: await page.close()
 
 
-# ⚠️ 绝对冷冻区：Svyun 内部逻辑一行未动 ⚠️
+# 🌟 Svyun：拨乱反正！恢复你历史成功的原版 JS 注入 🌟
 async def checkin_svyun(context):
-    print("【svyun.com】物理键盘级输入法 (稳定态)...")
+    print("【svyun.com】使用历史 100% 成功 JS 注入版...")
     page = await context.new_page()
     try:
         await page.goto('https://www.svyun.com/plugin/86/index.htm', timeout=60000)
+        await asyncio.sleep(8)
+        
+        # 核心：这就是你当年唯一成功的那套注入代码，原封不动！
+        await page.evaluate(f"""() => {{
+            const inputs = document.querySelectorAll('input');
+            const user = Array.from(inputs).find(i => i.placeholder?.includes('Email') || i.type === 'text');
+            const pass = Array.from(inputs).find(i => i.type === 'password');
+            const agree = document.querySelector('input[type="checkbox"]');
+            if(user) user.value = '{SVYUN_USER}';
+            if(pass) pass.value = '{SVYUN_PASS}';
+            if(agree) agree.click();
+            ['input', 'change', 'blur'].forEach(ev => {{
+                if(user) user.dispatchEvent(new Event(ev, {{ bubbles: true }}));
+                if(pass) pass.dispatchEvent(new Event(ev, {{ bubbles: true }}));
+            }});
+        }}""")
+        await asyncio.sleep(2)
+        await page.locator('button:has-text("Log in now"), button:has-text("Login")').first.click(force=True)
+        
         await asyncio.sleep(10)
-        
-        user_input = page.locator('input[placeholder*="Email"]').first
-        await user_input.wait_for(state="visible")
-        await user_input.click()
-        await user_input.clear()
-        await user_input.press_sequentially(SVYUN_USER, delay=100)
-        
-        pass_input = page.locator('input[type="password"]')
-        await pass_input.click()
-        await pass_input.clear()
-        await pass_input.press_sequentially(SVYUN_PASS, delay=100)
-        
-        await page.get_by_text("Read and agree").click()
-        await asyncio.sleep(1)
-        await page.locator('button:has-text("Login")').first.click()
-        
-        await asyncio.sleep(10)
+        # 签到
         btn = page.locator('button:has-text("立即签到"), .checkin-btn')
         if await btn.count() > 0:
             await btn.first.click()
             await asyncio.sleep(5)
             
+            # 抓取次数与详情弹窗
             await page.goto('https://www.svyun.com/plugin/94/draw.htm?id=2')
             await asyncio.sleep(5)
             text = await page.inner_text("body")
@@ -130,39 +130,30 @@ async def checkin_svyun(context):
     except Exception as e:
         return False, f"错误:{str(e)[:15]}", await save_debug(page, "svyun_err")
     finally: await page.close()
-# ⚠️ 绝对冷冻区结束 ⚠️
 
 
 async def checkin_vps8(context):
-    print("【vps8.zz.cd】物理降维打击 CF 验证框...")
+    print("【vps8.zz.cd】强攻 CF Turnstile...")
     page = await context.new_page()
     try:
         await page.goto('https://vps8.zz.cd/login', timeout=60000)
         await asyncio.sleep(5)
         
-        await page.locator('input[name="email"]').press_sequentially(VPS8_USER, delay=50)
-        await page.locator('input[name="password"]').press_sequentially(VPS8_PASS, delay=50)
+        await page.locator('input[name="email"]').fill(VPS8_USER)
+        await page.locator('input[name="password"]').fill(VPS8_PASS)
         
-        print("  正在寻找 Turnstile 验证框...")
-        iframe_element = page.locator('iframe[src*="challenges.cloudflare.com"]').first
-        
-        try:
-            await iframe_element.wait_for(state="visible", timeout=15000)
-            await asyncio.sleep(5) 
-            
-            box = await iframe_element.bounding_box()
+        print("  正在尝试物理点击 CF 盾...")
+        cf_iframe = page.locator('iframe[src*="challenges.cloudflare.com"]').first
+        if await cf_iframe.count() > 0:
+            box = await cf_iframe.bounding_box()
             if box:
-                print("  ✓ 捕获盾牌物理坐标，执行强制鼠标点击...")
+                # 点击偏左侧 30 像素位置，正中复选框靶心
                 click_x = box['x'] + 30
                 click_y = box['y'] + (box['height'] / 2)
-                
-                await page.mouse.move(click_x, click_y)
-                await asyncio.sleep(0.5)
-                await page.mouse.click(click_x, click_y, delay=150)
+                await page.mouse.click(click_x, click_y, delay=200)
                 await asyncio.sleep(5) 
-        except Exception as ex:
-            print(f"  ! 验证框处理失败或未出现: {ex}")
-            
+                
+        # 不管点没点中，强制发起登录
         await page.locator('button:has-text("登录"), button:has-text("Login")').first.click(force=True)
         await asyncio.sleep(10)
         
@@ -170,9 +161,9 @@ async def checkin_vps8(context):
         if await btn.count() > 0:
             await btn.first.click(force=True)
             return True, "签到成功", await save_debug(page, "vps8_ok")
-        return False, "未见按钮", await save_debug(page, "vps8_err")
+        return False, "未见签到按钮", await save_debug(page, "vps8_err")
     except Exception as e:
-        return False, f"错误:{str(e)[:20]}", await save_debug(page, "vps8_err")
+        return False, f"错误:{str(e)[:15]}", await save_debug(page, "vps8_err")
     finally: await page.close()
 
 # ================= 主流程 =================
@@ -183,14 +174,13 @@ async def main():
         browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-blink-features=AutomationControlled'])
         context = await browser.new_context(viewport={'width': 1280, 'height': 1024})
         
-        # 将任务包装在 try-except 中，确保绝对的隔离
         for name, func in [('Miniduo', checkin_miniduo), ('Svyun', checkin_svyun), ('VPS8', checkin_vps8)]:
             try:
                 ok, msg, ss = await func(context)
                 status = "✅" if ok else "❌"
                 await send_tg(f"{status} <b>{name}</b>: {msg}", photo=ss)
             except Exception as global_e:
-                await send_tg(f"❌ <b>{name}</b>: 发生致命崩溃 ({str(global_e)[:20]})")
+                await send_tg(f"❌ <b>{name}</b>: 发生致命崩溃")
             finally:
                 await asyncio.sleep(5)
             
