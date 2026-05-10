@@ -139,7 +139,9 @@ async def run_task(context):
             # 再次验证签到状态
             content = await page.content()
             if "已签到" in content:
-                return True, "签到动作成功执行！", await save_debug(page, "success")
+                # 保存两张截图：成功状态和最终确认
+                await save_debug(page, "success")
+                return True, "签到动作成功执行！", await save_debug(page, "final_checkin")
             return True, "按钮已点击，请看截图确认", await save_debug(page, "clicked")
         else:
             print("  -> 所有选择器都未找到按钮！")
