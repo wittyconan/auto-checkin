@@ -24,63 +24,75 @@ async def send_tg(text, photo=None):
             form = aiohttp.FormData()
             form.add_field('chat_id', TG_CHAT_ID)
             if photo: form.add_field('photo', open(photo, 'rb'))
-            form.add_field( 'caption' if photo else 'text', text)
+            form.add_field('caption' if photo else 'text', text)
             await session.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/{'sendPhoto' if photo else 'sendMessage'}", data=form)
         except: pass
 
-# ================= 核心逻辑 =================
+# ================= 业务流程 =================
 
 async def run_task(context):
     page = await context.new_page()
+    # 强制增加超时容忍
+    page.set_default_timeout(45000)
+    
     try:
-        # 1. 强制进入登录页
-        print("  -> 正在登录...")
-        await page.goto('https://www.svyun.com/plugin/86/index.htm', wait_until="domcontentloaded")
+        # 1. 直接强攻登录
+        print("  -> 访问登录页...")
+        await page.goto('https://www.svyun.com/plugin/86/index.htm', wait_until="networkidle")
         
-        # 只有在看到输入框时才登录
+        # 检查是否在登录页
         if await page.locator('input[placeholder*="Email"]').is_visible():
-            await page.locator('input[placeholder*="Email"]').fill(SVYUN_USER)
-            await page.locator('input[type="password"]').fill(SVYUN_PASS)
-            await page.get_by_text("Read and agree").click()
-            await page.locator('button:has-text("Login")').click()
-            await page.wait_for_load_state("networkidle")
-            await asyncio.sleep(5)
-
-        # 2. 【核心修改】模拟点击侧边栏的“每日签到”
-        # 这样做是为了触发页面内部的 Ajax 加载，防止直接跳转 URL 导致的按钮不渲染
-        print("  -> 正在通过侧边栏进入签到页...")
-        await page.locator('li:has-text("活动优惠")').click() # 先展开菜单
-        await asyncio.sleep(1)
-        await page.locator('a:has-text("每日签到")').click() # 点击签到项
+            print("  -> 使用 JS 注入方式进行强制登录...")
+            # 暴力 JS 注入：填充账号密码、强制勾选、强制点击登录按钮
+            await page.evaluate(f"""() => {{
+                document.querySelector('input[placeholder*="Email"]').value = '{SVYUN_USER}';
+                document.querySelector('input[type="password"]').value = '{SVYUN_PASS}';
+                // 暴力寻找并点击所有可能的 Checkbox
+                document.querySelectorAll('input[type="checkbox"]').forEach(i => i.checked = true);
+                // 暴力寻找并触发登录按钮
+                const loginBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Login'));
+                if(loginBtn) loginBtn.click();
+            }}""")
+            await asyncio.sleep(10)
+        
+        # 2. 模拟进入签到模块
+        print("  -> 跳转签到路径...")
+        await page.goto('https://www.svyun.com/plugin/94/index.htm', wait_until="networkidle")
         await asyncio.sleep(5)
 
-        # 3. 循环等待并强力点击
-        res_msg = "失败"
-        for i in range(15): # 延长到30秒总计
-            # 自动移除任何可能遮挡的 Layui 弹窗
-            await page.evaluate("document.querySelectorAll('.layui-layer').forEach(el => el.remove())")
+        # 3. 强力扫描签到按钮
+        res_msg = "操作失败"
+        for i in range(10):
+            # 自动移除遮挡层
+            await page.evaluate("document.querySelectorAll('.layui-layer, .modal-backdrop').forEach(el => el.remove())")
             
-            # 检查是否已签到
-            if await page.get_by_text("已签到").count() > 0 or await page.locator('.checkin-btn-done').is_visible():
-                res_msg = "今日已签到过"
-                return True, res_msg, await save_debug(page, "already_done")
-
-            # 定位立即签到按钮
-            btn = page.get_by_role("button", name=re.compile("立即签到"))
-            if await btn.is_visible():
-                print("  -> 发现按钮，执行 JavaScript 强制点击...")
-                # 使用 evaluate 绕过一切 UI 遮挡
-                await page.evaluate("Array.from(document.querySelectorAll('button')).find(el => el.textContent.includes('立即签到')).click()")
-                await asyncio.sleep(3)
-                return True, "签到成功", await save_debug(page, "success")
+            # 检查已签到状态
+            content = await page.content()
+            if "已签到" in content:
+                return True, "今日已签到过", await save_debug(page, "done")
             
-            print(f"  ...扫描中 ({i+1}/15)")
-            await asyncio.sleep(2)
+            # 暴力执行 JS 签到点击
+            btn_found = await page.evaluate("""() => {
+                const btn = Array.from(document.querySelectorAll('button, a')).find(el => el.innerText.includes('立即签到'));
+                if(btn) {
+                    btn.click();
+                    return true;
+                }
+                return false;
+            }""")
+            
+            if btn_found:
+                print("  -> JS 指令执行成功")
+                await asyncio.sleep(5)
+                return True, "签到指令已发送", await save_debug(page, "success")
+            
+            print(f"  ...等待按钮加载 ({i+1}/10)")
+            await asyncio.sleep(3)
 
-        return False, "超时未见按钮", await save_debug(page, "timeout_fail")
+        return False, "超时未能触发签到按钮", await save_debug(page, "timeout")
 
     except Exception as e:
-        return False, f"异常: {str(e)[:30]}", await save_debug(page, "error")
+        return False, f"流程异常: {str(e)[:30]}", await save_debug(page, "crash")
     finally:
         await page.close()
 
@@ -88,9 +100,17 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
         context = await browser.new_context(viewport={'width': 1280, 'height': 800})
-        ok, msg, ss = await run_task(context)
-        status = "✅" if ok else "❌"
-        await send_tg(f"{status} <b>Svyun 签到报告</b>\n结果: {msg}", photo=ss)
+        
+        # 增加一次全局重试
+        for attempt in range(2):
+            ok, msg, ss = await run_task(context)
+            if ok:
+                await send_tg(f"✅ <b>Svyun 签到报告</b>\n结果: {msg}", photo=ss)
+                break
+            elif attempt == 1:
+                await send_tg(f"❌ <b>Svyun 签到失败</b>\n原因: {msg}", photo=ss)
+            await asyncio.sleep(10)
+            
         await browser.close()
 
 if __name__ == '__main__':
