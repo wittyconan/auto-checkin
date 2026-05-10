@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime
 from playwright.async_api import async_playwright
 
-# ================= 配置区域 (已清理无用变量) =================
+# ================= 配置区域 =================
 SVYUN_USER = os.getenv('SVYUN_USER', '')
 SVYUN_PASS = os.getenv('SVYUN_PASS', '')
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', '')
@@ -14,11 +14,7 @@ SCREENSHOT_DIR = os.getenv('SCREENSHOT_DIR', './screenshots')
 
 # ================= 工具函数 =================
 async def save_debug(page, name, clip_element=None):
-    """
-    智能截图函数：
-    如果有 clip_element (局部元素)，则只截取该元素；
-    否则截取当前屏幕可是范围，不使用 full_page 防止卡死。
-    """
+    if not os.path.exists(SCREENSHOT_DIR): os.makedirs(SCREENSHOT_DIR)
     path = f"{SCREENSHOT_DIR}/debug_{name}_{datetime.now().strftime('%H%M%S')}.png"
     try:
         if clip_element and await clip_element.is_visible():
@@ -27,7 +23,7 @@ async def save_debug(page, name, clip_element=None):
             await page.screenshot(path=path, timeout=5000)
         return path
     except Exception as e:
-        print(f"  [截图超时忽略] {e}")
+        print(f"  [截图跳过] {e}")
         return None
 
 async def send_tg(text, photo=None):
@@ -44,94 +40,119 @@ async def send_tg(text, photo=None):
             else:
                 await session.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage", 
                                    json={'chat_id': TG_CHAT_ID, 'text': text, 'parse_mode': 'HTML'})
-        except Exception as e: print(f"  [TG失败] {e}")
+        except Exception as e: print(f"  [TG通知失败] {e}")
 
-# ================= Svyun 独尊版 =================
+# ================= 核心业务逻辑 =================
 
 async def checkin_svyun(context):
-    print("【svyun.com】物理键盘级输入法 (登录态绝对不改)...")
+    print("【Svyun】开始执行自动化流程...")
     page = await context.new_page()
+    
     try:
-        await page.goto('https://www.svyun.com/plugin/86/index.htm', timeout=60000)
-        await asyncio.sleep(10)
+        # 1. 登录流程
+        await page.goto('https://www.svyun.com/plugin/86/index.htm', wait_until="networkidle", timeout=60000)
+        await asyncio.sleep(5)
         
-        # 1. 物理点击并清空填入账号 (原汁原味)
+        # 输入账号
         user_input = page.locator('input[placeholder*="Email"]').first
         await user_input.wait_for(state="visible")
         await user_input.click()
-        await user_input.clear()
-        await user_input.press_sequentially(SVYUN_USER, delay=100)
+        await user_input.fill("") # 确保清空
+        await user_input.type(SVYUN_USER, delay=100)
         
-        # 2. 物理点击并清空填入密码 (原汁原味)
+        # 输入密码
         pass_input = page.locator('input[type="password"]')
-        await pass_input.click()
-        await pass_input.clear()
-        await pass_input.press_sequentially(SVYUN_PASS, delay=100)
+        await pass_input.type(SVYUN_PASS, delay=100)
         
-        # 3. 勾选并登录 (原汁原味)
+        # 勾选协议并登录
         await page.get_by_text("Read and agree").click()
-        await asyncio.sleep(1)
         await page.locator('button:has-text("Login")').first.click()
         
-        await asyncio.sleep(10)
-        
-        # 4. 显式跳转到你指定的签到页面
-        await page.goto('https://www.svyun.com/plugin/94/index.htm')
+        # 等待登录跳转完成
+        await page.wait_for_load_state("networkidle")
+        await asyncio.sleep(8)
+
+        # 2. 签到页处理
+        print("  -> 跳转至签到中心...")
+        await page.goto('https://www.svyun.com/plugin/94/index.htm', wait_until="networkidle")
         await asyncio.sleep(5)
-        
-        # 兼容处理：检查按钮是“立即签到”还是“已签到”
-        btn_sign = page.locator('button:has-text("立即签到"), .checkin-btn')
-        btn_signed = page.locator('button:has-text("已签到")')
-        
-        if await btn_sign.count() > 0:
-            await btn_sign.first.click()
+
+        # [加固] 尝试关闭可能遮挡的弹窗/公告
+        try:
+            close_btn = page.locator('.layui-layer-close, .close, [aria-label="Close"]').first
+            if await close_btn.is_visible():
+                await close_btn.click()
+        except: pass
+
+        # [定位] 查找签到按钮 (多重选择器)
+        # 优先寻找包含“立即签到”文字的按钮，其次寻找类名包含 checkin 的元素
+        btn_sign = page.locator('button:has-text("立即签到"), .checkin-btn, .btn-checkin').first
+        btn_signed = page.get_by_text("已签到")
+
+        if await btn_signed.count() > 0:
+            msg_status = "今日已签到过"
+            print(f"  ✓ {msg_status}")
+        elif await btn_sign.count() > 0:
+            print("  -> 发现签到按钮，正在点击...")
+            # 使用 force=True 穿透可能的透明遮挡层
+            await btn_sign.click(force=True)
             await asyncio.sleep(5)
-        elif await btn_signed.count() > 0:
-            print("  ✓ 今日已经签到过，直接去抽奖页截图")
+            msg_status = "签到动作已完成"
         else:
-            return False, "未见签到按钮", await save_debug(page, "svyun_fail")
-            
-        # 5. 跳转抽奖页获取次数
-        await page.goto('https://www.svyun.com/plugin/94/draw.htm?id=2')
+            return False, "未找到签到按钮", await save_debug(page, "not_found")
+
+        # 3. 抽奖页数据获取
+        print("  -> 跳转至抽奖页获取状态...")
+        await page.goto('https://www.svyun.com/plugin/94/draw.htm?id=2', wait_until="networkidle")
         await asyncio.sleep(5)
-        text = await page.inner_text("body")
-        count = re.search(r"剩余抽奖次数\s*(\d+)\s*次", text)
-        msg = f"剩余:{count.group(1)}次" if count else "签到成功(或已签到)"
         
-        # 6. 点击详情并准备局部截图
+        page_text = await page.content()
+        count_match = re.search(r"剩余抽奖次数\s*(\d+)", page_text)
+        draw_msg = f" | 剩余抽奖:{count_match.group(1)}" if count_match else ""
+        
+        # 尝试点击“查看详情”展示结果，并局部截图
         target_modal = None
-        try: 
+        try:
             await page.get_by_text("查看详情").click(timeout=5000)
             await asyncio.sleep(2)
-            # 尝试捕捉弹出的详情面板
-            dialogs = page.locator('.layui-layer, .el-dialog, .modal-content, [role="dialog"]')
-            if await dialogs.count() > 0:
-                target_modal = dialogs.first
+            # 这里的选择器根据 Layui 常见样式做了优化
+            modal_loc = page.locator('.layui-layer-content, .modal-body').first
+            if await modal_loc.is_visible():
+                target_modal = modal_loc
         except: pass
-        
-        return True, msg, await save_debug(page, "svyun_res", clip_element=target_modal)
-        
-    except Exception as e:
-        return False, f"错误:{str(e)[:15]}", await save_debug(page, "svyun_err")
-    finally: await page.close()
 
-# ================= 主流程 =================
+        return True, f"{msg_status}{draw_msg}", await save_debug(page, "success", clip_element=target_modal)
+
+    except Exception as e:
+        print(f"  ❌ 运行异常: {e}")
+        return False, f"错误:{str(e)[:30]}", await save_debug(page, "error")
+    finally:
+        await page.close()
+
+# ================= 主入口 =================
 
 async def main():
-    if not os.path.exists(SCREENSHOT_DIR): os.makedirs(SCREENSHOT_DIR)
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-blink-features=AutomationControlled'])
-        context = await browser.new_context(viewport={'width': 1280, 'height': 1024})
+        # 针对 GitHub Actions 的环境优化参数
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
+        )
+        # 模拟真实的浏览器环境
+        context = await browser.new_context(
+            viewport={'width': 1280, 'height': 1024},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        )
         
         try:
-            ok, msg, ss = await checkin_svyun(context)
-            status = "✅" if ok else "❌"
-            report = f"🔔 <b>自动签到报告</b>\n{status} <b>Svyun</b>: {msg}\n时间: {datetime.now().strftime('%m-%d %H:%M')}"
-            await send_tg(report, photo=ss)
-        except Exception as global_e:
-            await send_tg(f"❌ <b>Svyun</b>: 发生致命崩溃 ({str(global_e)[:20]})")
-            
-        await browser.close()
+            ok, msg, ss_path = await checkin_svyun(context)
+            status_icon = "✅" if ok else "❌"
+            report = f"🔔 <b>Svyun 自动签到结果</b>\n状态: {status_icon} {msg}\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            await send_tg(report, photo=ss_path)
+        except Exception as fatal:
+            await send_tg(f"⚠️ <b>脚本致命错误</b>\n内容: {str(fatal)[:50]}")
+        finally:
+            await browser.close()
 
 if __name__ == '__main__':
     asyncio.run(main())
