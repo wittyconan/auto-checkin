@@ -66,6 +66,16 @@ async def run_task(context):
         print("  -> 跳转签到页...")
         await page.goto('https://www.svyun.com/plugin/94/index.htm', wait_until="networkidle")
         await asyncio.sleep(5)
+        
+        # 检查是否被重定向到抽奖页面
+        if "抽奖" in await page.title():
+            print("  -> 被重定向到抽奖页，点击左侧'每日签到'导航...")
+            daily_sign_link = page.get_by_text("每日签到", exact=True)
+            if await daily_sign_link.is_visible():
+                await daily_sign_link.click()
+                await page.wait_for_load_state("networkidle")
+                await asyncio.sleep(5)
+                print(f"  -> 已跳转到: {await page.title()}")
 
         # 3. 扫描并签到
         print("  -> 检查签到状态...")
