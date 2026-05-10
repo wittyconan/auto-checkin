@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, re, asyncio, random
+import os, re, asyncio
 from datetime import datetime
 from playwright.async_api import async_playwright
 
@@ -34,73 +34,72 @@ async def run_task(context):
     page.set_default_timeout(60000)
     
     try:
-        print(f"  -> [{datetime.now().strftime('%H:%M:%S')}] 访问首页...")
-        # 尝试直接去签到页，如果被拦截会自动跳登录
-        await page.goto('https://www.svyun.com/plugin/94/index.htm', wait_until="domcontentloaded")
-        await asyncio.sleep(5)
+        print(f"  -> [{datetime.now().strftime('%H:%M:%S')}] 访问登录页...")
+        await page.goto('https://www.svyun.com/plugin/86/index.htm', wait_until="networkidle")
+        await asyncio.sleep(3)
 
-        # 1. 登录逻辑：改用物理模拟填充
+        # 1. 纯净的物理模拟登录
         email_input = page.locator('input[placeholder*="Email"]').first
         if await email_input.is_visible():
-            print("  -> 发现登录框，执行物理级模拟输入...")
-            # 物理点击并输入 (触发 Vue/React 的内部监听)
-            await email_input.click()
-            await email_input.fill("") # 先清空
-            await email_input.type(SVYUN_USER, delay=100)
+            print("  -> 正在填写账号密码...")
+            # 使用最稳妥的 fill，它能完美触发 Vue/React 的 input 事件
+            await email_input.fill(SVYUN_USER)
             
             pwd_input = page.locator('input[type="password"]').first
-            await pwd_input.click()
-            await pwd_input.type(SVYUN_PASS, delay=100)
+            await pwd_input.fill(SVYUN_PASS)
             
-            # 强行勾选协议 (JS 暴力勾选)
-            await page.evaluate("document.querySelectorAll('input[type=\"checkbox\"]').forEach(i => i.checked = true)")
+            print("  -> 正在物理点击同意协议...")
+            # 放弃 JS，直接点击页面上显示的文字标签
+            agree_text = page.locator('text="Read and agree"').first
+            await agree_text.click()
+            await asyncio.sleep(1) # 停顿一下，让动画和状态反应过来
             
-            # 点击登录
+            print("  -> 点击登录按钮...")
             login_btn = page.locator('button:has-text("Login")').first
             await login_btn.click()
-            print("  -> 已点击登录按钮，等待跳转...")
-            await asyncio.sleep(10)
             
-            # 登录完再次确保进入签到页
-            await page.goto('https://www.svyun.com/plugin/94/index.htm')
+            # 等待网络请求完成（登录请求）
+            await page.wait_for_load_state("networkidle")
             await asyncio.sleep(5)
+            
+        # 2. 进入签到页
+        print("  -> 跳转签到页...")
+        await page.goto('https://www.svyun.com/plugin/94/index.htm', wait_until="networkidle")
+        await asyncio.sleep(5)
 
-        # 2. 签到按钮扫描：增加 DOM 重新加载检测
-        for i in range(15):
-            # 强制刷新页面数据状态 (JS 注入)
+        # 3. 扫描并签到
+        for i in range(10):
+            # 清理可能的弹窗遮挡
             await page.evaluate("document.querySelectorAll('.layui-layer').forEach(el => el.remove())")
             
             content = await page.content()
             if "已签到" in content:
                 return True, "今日已成功签到", await save_debug(page, "final_done")
 
-            # 寻找按钮并执行 JS 点击 (因为物理点击在 Headless 模式下容易偏离)
-            clicked = await page.evaluate("""() => {
-                const b = Array.from(document.querySelectorAll('button, a, div')).find(el => el.innerText.trim() === '立即签到');
-                if(b) { b.click(); return true; }
-                return false;
-            }""")
-            
-            if clicked:
-                print("  -> 发现按钮并发送 JS 点击指令")
+            # 定位立即签到按钮
+            sign_btn = page.locator('button:has-text("立即签到")').first
+            if await sign_btn.is_visible():
+                print("  -> 找到签到按钮，正在点击...")
+                await sign_btn.click(force=True)
                 await asyncio.sleep(5)
+                
+                # 点击后验证
                 if "已签到" in await page.content():
-                    return True, "签到成功！", await save_debug(page, "success")
-                return True, "签到动作已触发", await save_debug(page, "triggered")
+                    return True, "签到动作成功执行！", await save_debug(page, "success")
+                return True, "按钮已点击，请看截图确认", await save_debug(page, "clicked")
             
-            print(f"  ...等待按钮加载 ({i+1}/15)")
-            await asyncio.sleep(2)
+            print(f"  ...等待按钮加载 ({i+1}/10)")
+            await asyncio.sleep(3)
 
-        return False, "页面已加载但未能点击成功", await save_debug(page, "fail_btn")
+        return False, "未能找到签到按钮", await save_debug(page, "fail_btn")
 
     except Exception as e:
-        return False, f"流程异常: {str(e)[:30]}", await save_debug(page, "crash")
+        return False, f"流程崩溃: {str(e)[:30]}", await save_debug(page, "crash")
     finally:
         await page.close()
 
 async def main():
     async with async_playwright() as p:
-        # 特别注意：针对 GitHub 环境关闭某些可能导致渲染失败的参数
         browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
         context = await browser.new_context(
             viewport={'width': 1280, 'height': 800},
@@ -116,7 +115,7 @@ async def main():
             else:
                 if attempt == 2:
                     await send_tg(f"❌ <b>Svyun 彻底失败</b>\n原因: {msg}", photo=ss)
-                await asyncio.sleep(30)
+                await asyncio.sleep(20)
         await browser.close()
 
 if __name__ == '__main__':
