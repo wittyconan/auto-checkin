@@ -84,27 +84,36 @@ async def run_task(context):
         # 尝试多种定位方式
         print("  -> 尝试定位签到按钮...")
         
-        # 尝试各种可能的按钮选择器
-        button_selectors = [
-            'button:has-text("立即签到")',
-            'a:has-text("立即签到")',
-            '.btn:has-text("立即签到")',
-            'button:has-text("签到")',
-            'a:has-text("签到")',
-            '[class*="sign"]',
-            '[class*="checkin"]',
-        ]
+        # 优先使用Playwright的get_by_text精确匹配"立即签到"
+        try:
+            sign_btn = page.get_by_text("立即签到", exact=True)
+            if await sign_btn.is_visible():
+                print("  -> 使用get_by_text精确匹配找到按钮")
+            else:
+                sign_btn = None
+        except:
+            sign_btn = None
         
-        sign_btn = None
-        for sel in button_selectors:
-            try:
-                btn = page.locator(sel).first
-                if await btn.is_visible():
-                    sign_btn = btn
-                    print(f"  -> 使用选择器找到按钮: {sel}")
-                    break
-            except:
-                continue
+        # 如果精确匹配失败，尝试其他选择器
+        if not sign_btn:
+            button_selectors = [
+                'button:has-text("立即签到")',
+                'div:has-text("立即签到")',
+                'span:has-text("立即签到")',
+                'a:has-text("立即签到")',
+                '[style*="blue"]:has-text("立即签到")',
+                '.btn-primary:has-text("立即签到")',
+            ]
+            
+            for sel in button_selectors:
+                try:
+                    btn = page.locator(sel).first
+                    if await btn.is_visible():
+                        sign_btn = btn
+                        print(f"  -> 使用选择器找到按钮: {sel}")
+                        break
+                except:
+                    continue
         
         if sign_btn:
             print("  -> 找到签到按钮，正在点击...")
