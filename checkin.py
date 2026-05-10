@@ -81,9 +81,15 @@ async def run_task(context):
             if await sign_btn.is_visible():
                 print("  -> 找到签到按钮，正在点击...")
                 await sign_btn.click(force=True)
-                await asyncio.sleep(5)
+                await asyncio.sleep(3)
                 
-                # 点击后验证
+                # 检查是否跳转到抽奖页面
+                if "抽奖" in await page.title() or "/plugin/95/" in page.url:
+                    print("  -> 页面跳转到抽奖页，返回签到页验证...")
+                    await page.goto('https://www.svyun.com/plugin/94/index.htm', wait_until="networkidle")
+                    await asyncio.sleep(5)
+                
+                # 再次验证签到状态
                 if "已签到" in await page.content():
                     return True, "签到动作成功执行！", await save_debug(page, "success")
                 return True, "按钮已点击，请看截图确认", await save_debug(page, "clicked")
