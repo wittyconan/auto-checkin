@@ -68,36 +68,64 @@ async def run_task(context):
         await asyncio.sleep(5)
 
         # 3. 扫描并签到
-        for i in range(10):
-            # 清理可能的弹窗遮挡
-            await page.evaluate("document.querySelectorAll('.layui-layer').forEach(el => el.remove())")
+        print("  -> 检查签到状态...")
+        print(f"  -> 当前URL: {page.url}")
+        print(f"  -> 页面标题: {await page.title()}")
+        
+        content = await page.content()
+        
+        # 先检查是否已经签到过
+        if "已签到" in content:
+            return True, "今日已成功签到", await save_debug(page, "final_done")
+        
+        # 保存调试截图
+        await save_debug(page, "before_checkin")
+        
+        # 尝试多种定位方式
+        print("  -> 尝试定位签到按钮...")
+        
+        # 尝试各种可能的按钮选择器
+        button_selectors = [
+            'button:has-text("立即签到")',
+            'a:has-text("立即签到")',
+            '.btn:has-text("立即签到")',
+            'button:has-text("签到")',
+            'a:has-text("签到")',
+            '[class*="sign"]',
+            '[class*="checkin"]',
+        ]
+        
+        sign_btn = None
+        for sel in button_selectors:
+            try:
+                btn = page.locator(sel).first
+                if await btn.is_visible():
+                    sign_btn = btn
+                    print(f"  -> 使用选择器找到按钮: {sel}")
+                    break
+            except:
+                continue
+        
+        if sign_btn:
+            print("  -> 找到签到按钮，正在点击...")
+            await sign_btn.click(force=True)
+            await asyncio.sleep(5)
             
+            # 检查是否跳转到抽奖页面
+            if "抽奖" in await page.title() or "/plugin/95/" in page.url:
+                print("  -> 页面跳转到抽奖页，返回签到页验证...")
+                await page.goto('https://www.svyun.com/plugin/94/index.htm', wait_until="networkidle")
+                await asyncio.sleep(5)
+            
+            # 再次验证签到状态
             content = await page.content()
             if "已签到" in content:
-                return True, "今日已成功签到", await save_debug(page, "final_done")
-
-            # 定位立即签到按钮
-            sign_btn = page.locator('button:has-text("立即签到")').first
-            if await sign_btn.is_visible():
-                print("  -> 找到签到按钮，正在点击...")
-                await sign_btn.click(force=True)
-                await asyncio.sleep(3)
-                
-                # 检查是否跳转到抽奖页面
-                if "抽奖" in await page.title() or "/plugin/95/" in page.url:
-                    print("  -> 页面跳转到抽奖页，返回签到页验证...")
-                    await page.goto('https://www.svyun.com/plugin/94/index.htm', wait_until="networkidle")
-                    await asyncio.sleep(5)
-                
-                # 再次验证签到状态
-                if "已签到" in await page.content():
-                    return True, "签到动作成功执行！", await save_debug(page, "success")
-                return True, "按钮已点击，请看截图确认", await save_debug(page, "clicked")
-            
-            print(f"  ...等待按钮加载 ({i+1}/10)")
-            await asyncio.sleep(3)
-
-        return False, "未能找到签到按钮", await save_debug(page, "fail_btn")
+                return True, "签到动作成功执行！", await save_debug(page, "success")
+            return True, "按钮已点击，请看截图确认", await save_debug(page, "clicked")
+        else:
+            print("  -> 所有选择器都未找到按钮！")
+            await save_debug(page, "no_button")
+            return False, "未能找到签到按钮", await save_debug(page, "fail_btn")
 
     except Exception as e:
         return False, f"流程崩溃: {str(e)[:30]}", await save_debug(page, "crash")
