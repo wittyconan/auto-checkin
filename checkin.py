@@ -67,8 +67,16 @@ async def run_task(context):
         await page.goto('https://www.svyun.com/plugin/94/index.htm', wait_until="networkidle")
         await asyncio.sleep(5)
         
+        # 检查是否服务器超时错误
+        title = await page.title()
+        if "504" in title or "Gateway Timeout" in title or "Timeout" in title:
+            print("  -> 检测到服务器超时，尝试刷新页面...")
+            await page.reload(wait_until="networkidle")
+            await asyncio.sleep(10)
+            title = await page.title()
+        
         # 检查是否被重定向到抽奖页面
-        if "抽奖" in await page.title():
+        if "抽奖" in title:
             print("  -> 被重定向到抽奖页，点击左侧'每日签到'导航...")
             daily_sign_link = page.get_by_text("每日签到", exact=True)
             if await daily_sign_link.is_visible():
