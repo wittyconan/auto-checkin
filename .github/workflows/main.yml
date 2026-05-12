@@ -1,7 +1,7 @@
 name: Auto Check-in
 on:
   schedule:
-    - cron: '20 1 * * *'  # 每日 UTC 1:20 执行 ✅ 已修复
+    - cron: '05 16 * * *'  # 北京时间 每日 00:05 运行（超低延迟）
   workflow_dispatch:      # 允许手动运行
 env:
   TZ: Asia/Shanghai       # 时区统一（和你IPTV脚本保持一致）
